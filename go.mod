@@ -1,4 +1,4 @@
-module protoyaml
+module github.com/apstndb/protoyaml
 
 go 1.16
 

@@ -32,10 +32,12 @@ func WithYAMLOptions(opts ...yaml.EncodeOption) Option {
 
 // WithFlowLeafCollections renders every mapping whose values are all scalars in
 // YAML flow style (for example {k: v, k2: v2}) instead of block style.
-// Sequences always stay in block style and non-leaf mappings (those that
-// contain a nested mapping or sequence) always stay in block style. The result
-// is more compact for deeply nested leaf records while keeping the outer
-// structure readable.
+// Sequences always stay in block style, non-leaf mappings (those that contain
+// a nested mapping or sequence) always stay in block style, and the document
+// root mapping always stays in block style so the output reads as a YAML
+// document even when the whole message is scalar-only. The result is more
+// compact for deeply nested leaf records while keeping the outer structure
+// readable.
 func WithFlowLeafCollections() Option {
 	return func(c *config) {
 		c.flowLeaf = true
@@ -99,7 +101,7 @@ func Marshal(m proto.Message, opts ...Option) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	ast.Walk(flowLeafVisitor{}, node)
+	walkFlowLeaf(node)
 	out := node.String()
 	// node.String() does not append a trailing newline; yaml.Marshal does, so
 	// normalize to match and keep the two paths consistent.
@@ -107,6 +109,19 @@ func Marshal(m proto.Message, opts ...Option) ([]byte, error) {
 		out += "\n"
 	}
 	return []byte(out), nil
+}
+
+// walkFlowLeaf applies the flow-leaf transform below the document root: the
+// root mapping itself always stays block so the output reads as a YAML
+// document, while every nested leaf mapping is flipped to flow style.
+func walkFlowLeaf(root ast.Node) {
+	if m, ok := root.(*ast.MappingNode); ok {
+		for _, val := range m.Values {
+			ast.Walk(flowLeafVisitor{}, val.Value)
+		}
+		return
+	}
+	ast.Walk(flowLeafVisitor{}, root)
 }
 
 // flowLeafVisitor flips mappings whose values are all scalars to flow style.

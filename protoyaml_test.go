@@ -99,6 +99,32 @@ executionStats:
 	}
 }
 
+// TestFlowLeafRootStaysBlock: a message whose fields are all scalars would
+// qualify as a leaf mapping, but the document root must stay block style so
+// the output reads as a YAML document rather than an inline value.
+func TestFlowLeafRootStaysBlock(t *testing.T) {
+	fd := buildTestFile()
+	planMD := messageDescriptor(fd, "PlanNode")
+
+	plan := dynamicpb.NewMessage(planMD)
+	setField(plan.ProtoReflect(), "index", protoreflect.ValueOfInt32(1))
+	setField(plan.ProtoReflect(), "kind", protoreflect.ValueOfEnum(protoreflect.EnumNumber(1))) // RELATIONAL
+	setField(plan.ProtoReflect(), "display_name", protoreflect.ValueOfString("Child"))
+
+	got, err := protoyaml.Marshal(plan, protoyaml.WithFlowLeafCollections())
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	const want = `index: 1
+kind: RELATIONAL
+displayName: Child
+`
+	if string(got) != want {
+		t.Errorf("root mapping must stay block:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 // --- test message corpus --------------------------------------------------
 
 // roundTripMessages returns messages safe for proto.Equal round-tripping

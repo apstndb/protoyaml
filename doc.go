@@ -3,12 +3,16 @@
 //
 // # Definition
 //
-// protobuf has exactly one canonical JSON mapping, defined by protojson. This
-// package is that mapping expressed in YAML syntax, using goccy/go-yaml as the
-// YAML engine. It is canonical-only by design: there is no non-canonical or
-// reflection-based mode. Every value this package emits or accepts is, by
-// definition, the protojson representation written in YAML rather than JSON
-// syntax.
+// protobuf's JSON representation is defined by protojson. This package renders
+// and parses that representation in YAML syntax, using goccy/go-yaml as the
+// YAML engine.
+//
+// By default the output is the canonical protojson mapping. protojson-sanctioned
+// variants are opt-in through WithProtoJSON: passing a protojson.MarshalOptions
+// value enables the knobs protojson itself defines (UseProtoNames,
+// UseEnumNumbers, EmitUnpopulated, a custom type Resolver, and so on). There is
+// no non-protojson (reflection-based) mode: every value this package emits or
+// accepts is a protojson representation written in YAML rather than JSON syntax.
 //
 // This is unrelated to github.com/bufbuild/protoyaml-go, which uses a different
 // YAML engine and pursues different design goals.

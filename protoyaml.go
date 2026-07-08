@@ -44,10 +44,17 @@ func WithFlowLeafCollections() Option {
 	}
 }
 
-// WithProtoJSON sets the protojson.MarshalOptions used for the canonical
-// protojson stage of Marshal. The zero value is used by default. Note that
-// Marshal always drives protojson for its semantics; only the marshal options
-// (EmitUnpopulated, UseProtoNames, resolver, and so on) are configurable here.
+// WithProtoJSON sets the protojson.MarshalOptions used for the protojson stage
+// of Marshal. The zero value (the canonical protojson mapping) is used by
+// default; passing a non-zero value opts into the protojson-sanctioned variants
+// protojson itself defines (EmitUnpopulated, UseProtoNames, UseEnumNumbers, a
+// custom type Resolver, and so on). Marshal always drives protojson for its
+// semantics; this option only selects which protojson marshal options apply.
+//
+// This configures the marshal side only. The unmarshal side uses a fixed
+// protojson.UnmarshalOptions{DiscardUnknown: true} with the default (global)
+// type resolver; there is currently no option to supply a custom resolver to
+// Unmarshal (see UnmarshalJSON).
 func WithProtoJSON(o protojson.MarshalOptions) Option {
 	return func(c *config) {
 		c.protojson = o
@@ -62,12 +69,14 @@ var jsonpb = protojson.UnmarshalOptions{
 	DiscardUnknown: true,
 }
 
-// Marshal renders m as YAML using the canonical protojson mapping.
+// Marshal renders m as YAML using the protojson mapping. By default that is the
+// canonical protojson mapping; WithProtoJSON opts into the protojson-sanctioned
+// variants (UseProtoNames, UseEnumNumbers, EmitUnpopulated, a custom Resolver).
 //
-// The pipeline is: protojson.Marshal(m) produces canonical JSON, that JSON is
-// parsed by goccy/go-yaml with UseOrderedMap so protojson's key order is
-// preserved (JSON is valid YAML flow syntax), and the ordered value is rendered
-// back out as YAML. There is intentionally no non-canonical reflection path.
+// The pipeline is: protojson.Marshal(m) produces the JSON, that JSON is parsed
+// by goccy/go-yaml with UseOrderedMap so protojson's key order is preserved
+// (JSON is valid YAML flow syntax), and the ordered value is rendered back out
+// as YAML. There is intentionally no non-protojson (reflection) path.
 func Marshal(m proto.Message, opts ...Option) ([]byte, error) {
 	var cfg config
 	for _, o := range opts {

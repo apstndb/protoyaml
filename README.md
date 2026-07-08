@@ -4,9 +4,11 @@
 
 ## Definition
 
-protobuf has exactly one canonical JSON mapping, defined by [`protojson`](https://pkg.go.dev/google.golang.org/protobuf/encoding/protojson). This module *is* that mapping expressed in YAML syntax. It is **canonical-only by design**: there is no non-canonical or reflection-based mode.
+protobuf's JSON representation is defined by [`protojson`](https://pkg.go.dev/google.golang.org/protobuf/encoding/protojson). This module renders and parses that representation in YAML syntax.
 
-Why canonical-only? The protojson mapping already answers every representation question protobuf has (enum names, `int64` as string, well-known type encodings such as `Timestamp`/`Duration`/`Struct`, and so on). Rendering that single mapping in YAML syntax keeps the behavior predictable and the semantics identical to protojson; a second, YAML-specific mapping would only introduce ambiguity. So `protoyaml` treats protojson as the semantics anchor and uses goccy/go-yaml purely for syntax.
+**By default the output is the canonical protojson mapping.** protojson-sanctioned variants are opt-in through [`WithProtoJSON`](#api): passing a `protojson.MarshalOptions` value enables the knobs protojson itself defines — `UseProtoNames`, `UseEnumNumbers`, `EmitUnpopulated`, a custom type `Resolver`, and so on. There is **no non-protojson (reflection-based) mode**: every value this module emits or accepts is a protojson representation written in YAML rather than JSON syntax.
+
+Why anchor on protojson? The protojson mapping already answers every representation question protobuf has (enum names, `int64` as string, well-known type encodings such as `Timestamp`/`Duration`/`Struct`, and so on). Rendering that mapping in YAML syntax keeps the behavior predictable and the semantics identical to protojson; a second, YAML-specific mapping would only introduce ambiguity. So `protoyaml` treats protojson as the semantics anchor and uses goccy/go-yaml purely for syntax.
 
 ## API
 
@@ -61,6 +63,14 @@ This keeps the outer structure readable while compacting the innermost records. 
 ## Compatibility
 
 The exact output bytes are part of the compatibility surface: **a change to the rendered bytes is a breaking change**, subject to this module's versioning policy. The semantics are inherited from protojson, so protobuf's JSON mapping rules apply unchanged; changes in the protobuf library's protojson output propagate here.
+
+## Known limitations
+
+These stem from goccy/go-yaml's scalar handling and are pinned by characterization tests (`TestDoubleLexicalEdgeLimitations`, `TestAnyUnmarshalResolverGap`) so any behavior change is caught:
+
+- **Negative zero**: protojson emits `-0` for a negative-zero double, but the YAML bridge decodes it as integer `0`, so the sign is lost on Marshal and the value round-trips to `+0`.
+- **Exponent-form doubles without a decimal point** (e.g. `1e+21`, `5e-324`): the emitted YAML scalar is unquoted and reads back as a string in the generic JSON tree (`YAMLToJSON`). `Unmarshal` into a proto message still works because protojson accepts string-encoded numbers for double fields.
+- **`Any` with a custom type resolver**: `WithProtoJSON` supplies a resolver to Marshal only; `Unmarshal`/`UnmarshalJSON` use the global type registry. An `Any` whose type is known only to a custom resolver marshals but does not unmarshal. An unmarshal-side option may be added later.
 
 ## License
 

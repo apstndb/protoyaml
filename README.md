@@ -4,9 +4,11 @@
 
 ## Definition
 
-protobuf has exactly one canonical JSON mapping, defined by [`protojson`](https://pkg.go.dev/google.golang.org/protobuf/encoding/protojson). This module *is* that mapping expressed in YAML syntax. It is **canonical-only by design**: there is no non-canonical or reflection-based mode.
+protobuf's JSON representation is defined by [`protojson`](https://pkg.go.dev/google.golang.org/protobuf/encoding/protojson). This module renders and parses that representation in YAML syntax.
 
-Why canonical-only? The protojson mapping already answers every representation question protobuf has (enum names, `int64` as string, well-known type encodings such as `Timestamp`/`Duration`/`Struct`, and so on). Rendering that single mapping in YAML syntax keeps the behavior predictable and the semantics identical to protojson; a second, YAML-specific mapping would only introduce ambiguity. So `protoyaml` treats protojson as the semantics anchor and uses goccy/go-yaml purely for syntax.
+**By default the output is the canonical protojson mapping.** protojson-sanctioned variants are opt-in through [`WithProtoJSON`](#api): passing a `protojson.MarshalOptions` value enables the knobs protojson itself defines — `UseProtoNames`, `UseEnumNumbers`, `EmitUnpopulated`, a custom type `Resolver`, and so on. There is **no non-protojson (reflection-based) mode**: every value this module emits or accepts is a protojson representation written in YAML rather than JSON syntax.
+
+Why anchor on protojson? The protojson mapping already answers every representation question protobuf has (enum names, `int64` as string, well-known type encodings such as `Timestamp`/`Duration`/`Struct`, and so on). Rendering that mapping in YAML syntax keeps the behavior predictable and the semantics identical to protojson; a second, YAML-specific mapping would only introduce ambiguity. So `protoyaml` treats protojson as the semantics anchor and uses goccy/go-yaml purely for syntax.
 
 ## API
 

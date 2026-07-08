@@ -1,8 +1,9 @@
 module github.com/apstndb/protoyaml
 
-go 1.16
+go 1.23
 
 require (
-	google.golang.org/protobuf v1.27.1
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	github.com/goccy/go-yaml v1.17.1
+	github.com/google/go-cmp v0.6.0
+	google.golang.org/protobuf v1.33.0
 )

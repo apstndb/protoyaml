@@ -2,43 +2,160 @@ package protoyaml
 
 import (
 	"encoding/json"
+	"strings"
 
+	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-
-	"gopkg.in/yaml.v3"
 )
 
-func Unmarshal(b []byte, result proto.Message) error {
-	j, err := yamlToJSON(b)
+// config holds the resolved options for a Marshal call.
+type config struct {
+	yamlOpts  []yaml.EncodeOption
+	protojson protojson.MarshalOptions
+	flowLeaf  bool
+}
+
+// Option configures Marshal. Options are applied in order.
+type Option func(*config)
+
+// WithYAMLOptions passes goccy/go-yaml encode options through to the YAML
+// rendering stage. Use it for stylistic control such as yaml.Indent,
+// yaml.IndentSequence, or yaml.UseLiteralStyleIfMultiline. These options only
+// affect the lexical shape of the output; they never change its semantics.
+func WithYAMLOptions(opts ...yaml.EncodeOption) Option {
+	return func(c *config) {
+		c.yamlOpts = append(c.yamlOpts, opts...)
+	}
+}
+
+// WithFlowLeafCollections renders every mapping whose values are all scalars in
+// YAML flow style (for example {k: v, k2: v2}) instead of block style.
+// Sequences always stay in block style and non-leaf mappings (those that
+// contain a nested mapping or sequence) always stay in block style. The result
+// is more compact for deeply nested leaf records while keeping the outer
+// structure readable.
+func WithFlowLeafCollections() Option {
+	return func(c *config) {
+		c.flowLeaf = true
+	}
+}
+
+// WithProtoJSON sets the protojson.MarshalOptions used for the canonical
+// protojson stage of Marshal. The zero value is used by default. Note that
+// Marshal always drives protojson for its semantics; only the marshal options
+// (EmitUnpopulated, UseProtoNames, resolver, and so on) are configurable here.
+func WithProtoJSON(o protojson.MarshalOptions) Option {
+	return func(c *config) {
+		c.protojson = o
+	}
+}
+
+// jsonpb is the fixed protojson decode configuration for the unmarshal side.
+// DiscardUnknown mirrors the behavior of the reference implementation in
+// github.com/apstndb/spannerplan so that YAML documents carrying extra keys do
+// not fail to load.
+var jsonpb = protojson.UnmarshalOptions{
+	DiscardUnknown: true,
+}
+
+// Marshal renders m as YAML using the canonical protojson mapping.
+//
+// The pipeline is: protojson.Marshal(m) produces canonical JSON, that JSON is
+// parsed by goccy/go-yaml with UseOrderedMap so protojson's key order is
+// preserved (JSON is valid YAML flow syntax), and the ordered value is rendered
+// back out as YAML. There is intentionally no non-canonical reflection path.
+func Marshal(m proto.Message, opts ...Option) ([]byte, error) {
+	var cfg config
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	// protojson is the semantics anchor: whatever it emits is, by definition,
+	// the canonical representation this package renders in YAML syntax.
+	j, err := cfg.protojson.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+
+	// Lossless ordered bridge: JSON is valid YAML flow syntax, so decoding with
+	// UseOrderedMap yields yaml.MapSlice trees that preserve protojson's field
+	// order (field-number order, with map keys sorted by protojson).
+	var v any
+	if err := yaml.UnmarshalWithOptions(j, &v, yaml.UseOrderedMap()); err != nil {
+		return nil, err
+	}
+
+	if !cfg.flowLeaf {
+		return yaml.MarshalWithOptions(v, cfg.yamlOpts...)
+	}
+
+	// For flow-leaf rendering we build the encoder's AST (which carries correct
+	// positions for inline flow rendering) and flip qualifying mappings to flow
+	// style before serializing. Re-parsing block output and flipping does not
+	// re-render inline correctly, so we go through ValueToNode instead.
+	node, err := yaml.ValueToNode(v, cfg.yamlOpts...)
+	if err != nil {
+		return nil, err
+	}
+	ast.Walk(flowLeafVisitor{}, node)
+	out := node.String()
+	// node.String() does not append a trailing newline; yaml.Marshal does, so
+	// normalize to match and keep the two paths consistent.
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return []byte(out), nil
+}
+
+// flowLeafVisitor flips mappings whose values are all scalars to flow style.
+type flowLeafVisitor struct{}
+
+// Visit implements ast.Visitor. It returns itself so ast.Walk keeps descending.
+func (flowLeafVisitor) Visit(n ast.Node) ast.Visitor {
+	m, ok := n.(*ast.MappingNode)
+	if !ok {
+		return flowLeafVisitor{}
+	}
+	for _, val := range m.Values {
+		switch val.Value.(type) {
+		case *ast.MappingNode, *ast.SequenceNode:
+			// A nested collection makes this a non-leaf mapping: leave it block.
+			return flowLeafVisitor{}
+		}
+	}
+	m.SetIsFlowStyle(true)
+	return flowLeafVisitor{}
+}
+
+// Unmarshal parses YAML into m using the canonical protojson mapping.
+//
+// It converts YAML to JSON (see YAMLToJSON) and then decodes with
+// protojson using DiscardUnknown, so unknown fields are ignored rather than
+// rejected.
+func Unmarshal(b []byte, m proto.Message) error {
+	j, err := YAMLToJSON(b)
 	if err != nil {
 		return err
 	}
-	return protojson.Unmarshal(j, result)
+	return UnmarshalJSON(j, m)
 }
 
-func Marshal(m proto.Message) ([]byte, error) {
-	j, err := protojson.Marshal(m)
-	if err != nil {
-		return nil, err
-	}
-	return jsonToYAML(j)
+// UnmarshalJSON decodes canonical protojson bytes into m with DiscardUnknown.
+func UnmarshalJSON(j []byte, m proto.Message) error {
+	return jsonpb.Unmarshal(j, m)
 }
 
-func yamlToJSON(y []byte) ([]byte, error) {
-	var i interface{}
-	err := yaml.Unmarshal(y, &i)
-	if err != nil {
+// YAMLToJSON converts YAML bytes into JSON bytes suitable for
+// protojson.Unmarshal. It decodes the YAML into a generic value with
+// goccy/go-yaml (which normalizes mapping keys to strings) and re-encodes it
+// with encoding/json. This mirrors the reference implementation in
+// github.com/apstndb/spannerplan.
+func YAMLToJSON(y []byte) ([]byte, error) {
+	var i any
+	if err := yaml.Unmarshal(y, &i); err != nil {
 		return nil, err
 	}
 	return json.Marshal(i)
-}
-
-func jsonToYAML(j []byte) ([]byte, error) {
-	var i interface{}
-	err := json.Unmarshal(j, &i)
-	if err != nil {
-		return nil, err
-	}
-	return yaml.Marshal(i)
 }

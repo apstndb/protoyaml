@@ -64,6 +64,14 @@ This keeps the outer structure readable while compacting the innermost records. 
 
 The exact output bytes are part of the compatibility surface: **a change to the rendered bytes is a breaking change**, subject to this module's versioning policy. The semantics are inherited from protojson, so protobuf's JSON mapping rules apply unchanged; changes in the protobuf library's protojson output propagate here.
 
+## Known limitations
+
+These stem from goccy/go-yaml's scalar handling and are pinned by characterization tests (`TestDoubleLexicalEdgeLimitations`, `TestAnyUnmarshalResolverGap`) so any behavior change is caught:
+
+- **Negative zero**: protojson emits `-0` for a negative-zero double, but the YAML bridge decodes it as integer `0`, so the sign is lost on Marshal and the value round-trips to `+0`.
+- **Exponent-form doubles without a decimal point** (e.g. `1e+21`, `5e-324`): the emitted YAML scalar is unquoted and reads back as a string in the generic JSON tree (`YAMLToJSON`). `Unmarshal` into a proto message still works because protojson accepts string-encoded numbers for double fields.
+- **`Any` with a custom type resolver**: `WithProtoJSON` supplies a resolver to Marshal only; `Unmarshal`/`UnmarshalJSON` use the global type registry. An `Any` whose type is known only to a custom resolver marshals but does not unmarshal. An unmarshal-side option may be added later.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

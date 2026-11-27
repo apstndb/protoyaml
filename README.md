@@ -52,9 +52,10 @@ executionStats:
 
 ### WithFlowLeafCollections
 
-By default every collection renders in block style. `WithFlowLeafCollections` renders every **mapping whose values are all scalars** in flow style (`{k: v, k2: v2}`) instead. The rules are:
+By default every collection renders in block style. `WithFlowLeafCollections` renders eligible leaf mappings in flow style (`{k: v, k2: v2}`).
 
-- **Leaf mappings** (all values are scalars) become flow style.
+- **Leaf mappings** become flow style when all keys and scalar values are valid in flow style.
+- **Mappings with block scalars or plain strings containing commas, brackets, or braces** stay block style. Quoted scalars can contain those characters in flow style.
 - **Non-leaf mappings** (containing a nested mapping or sequence) stay block style.
 - **Sequences** always stay block style.
 

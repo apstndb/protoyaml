@@ -30,14 +30,11 @@ func WithYAMLOptions(opts ...yaml.EncodeOption) Option {
 	}
 }
 
-// WithFlowLeafCollections renders every mapping whose values are all scalars in
-// YAML flow style (for example {k: v, k2: v2}) instead of block style.
-// Sequences always stay in block style, non-leaf mappings (those that contain
-// a nested mapping or sequence) always stay in block style, and the document
-// root mapping always stays in block style so the output reads as a YAML
-// document even when the whole message is scalar-only. The result is more
-// compact for deeply nested leaf records while keeping the outer structure
-// readable.
+// WithFlowLeafCollections renders leaf mappings with flow-compatible keys
+// and scalar values in YAML flow style (for example {k: v, k2: v2}).
+// Mappings containing block scalars or plain strings with flow punctuation
+// (commas, brackets, or braces) stay in block style. The document root
+// mapping, non-leaf mappings, and sequences also stay in block style.
 func WithFlowLeafCollections() Option {
 	return func(c *config) {
 		c.flowLeaf = true
@@ -121,8 +118,8 @@ func Marshal(m proto.Message, opts ...Option) ([]byte, error) {
 }
 
 // walkFlowLeaf applies the flow-leaf transform below the document root: the
-// root mapping itself always stays block so the output reads as a YAML
-// document, while every nested leaf mapping is flipped to flow style.
+// root mapping itself stays block, and eligible nested leaf mappings are
+// flipped to flow style.
 func walkFlowLeaf(root ast.Node) {
 	if m, ok := root.(*ast.MappingNode); ok {
 		for _, val := range m.Values {
@@ -133,7 +130,7 @@ func walkFlowLeaf(root ast.Node) {
 	ast.Walk(flowLeafVisitor{}, root)
 }
 
-// flowLeafVisitor flips mappings whose values are all scalars to flow style.
+// flowLeafVisitor flips leaf mappings whose entries can be written in flow style.
 type flowLeafVisitor struct{}
 
 // Visit implements ast.Visitor. It returns itself so ast.Walk keeps descending.
@@ -144,13 +141,27 @@ func (flowLeafVisitor) Visit(n ast.Node) ast.Visitor {
 	}
 	for _, val := range m.Values {
 		switch val.Value.(type) {
-		case *ast.MappingNode, *ast.SequenceNode:
-			// A nested collection makes this a non-leaf mapping: leave it block.
+		case *ast.MappingNode, *ast.SequenceNode, *ast.LiteralNode:
+			return flowLeafVisitor{}
+		}
+		if !flowCompatibleString(val.Key) || !flowCompatibleString(val.Value) {
 			return flowLeafVisitor{}
 		}
 	}
 	m.SetIsFlowStyle(true)
 	return flowLeafVisitor{}
+}
+
+func flowCompatibleString(n ast.Node) bool {
+	s, ok := n.(*ast.StringNode)
+	if !ok || !strings.ContainsAny(s.Value, "\r\n,[]{}") {
+		return true
+	}
+	// goccy can quote a StringNode while rendering it, even when its token
+	// is plain. A plain multiline node renders as a block scalar, and plain
+	// commas, brackets and braces can become delimiters in a flow mapping.
+	rendered := s.String()
+	return strings.HasPrefix(rendered, `"`) || strings.HasPrefix(rendered, "'")
 }
 
 // Unmarshal parses YAML into m using the canonical protojson mapping.

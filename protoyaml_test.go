@@ -676,6 +676,78 @@ func TestFlowLeafLiteralMultiline(t *testing.T) {
 	}
 }
 
+func TestFlowLeafMappingRoundTrip(t *testing.T) {
+	const query = "SELECT 1\nFROM Users"
+	multilineMap := map[string]any{"query": query, "label": "example"}
+	fixtures := []struct {
+		name string
+		leaf any
+	}{
+		{"nested map", multilineMap},
+		{"map inside sequence", []any{multilineMap}},
+		{"scalar sequence", []any{query, "example"}},
+		{"plain comma value", map[string]any{"query": "SELECT a, b FROM t"}},
+		{"plain bracket value", map[string]any{"query": "ARRAY[1, 2]"}},
+		{"plain brace value", map[string]any{"query": "STRUCT<a INT64>{1}"}},
+		{"plain comma key", map[string]any{"a,b": "example"}},
+		{"quoted map", map[string]any{"query": "note: " + query}},
+		{"auto-quoted flow delimiters", map[string]any{"query": "[1, 2]"}},
+	}
+	cases := []struct {
+		name string
+		flow bool
+		opts []protoyaml.Option
+	}{
+		{name: "default"},
+		{name: "literal", opts: []protoyaml.Option{protoyaml.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))}},
+		{name: "flow", flow: true, opts: []protoyaml.Option{protoyaml.WithFlowLeafCollections()}},
+		{
+			name: "flow and literal",
+			flow: true,
+			opts: []protoyaml.Option{
+				protoyaml.WithFlowLeafCollections(),
+				protoyaml.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true)),
+			},
+		},
+	}
+	for _, fixture := range fixtures {
+		m, err := structpb.NewStruct(map[string]any{
+			"leaf":    fixture.leaf,
+			"sibling": map[string]any{"count": 1.0},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tt := range cases {
+			t.Run(fixture.name+"/"+tt.name, func(t *testing.T) {
+				y, err := protoyaml.Marshal(m, tt.opts...)
+				if err != nil {
+					t.Fatalf("Marshal: %v", err)
+				}
+				if tt.flow && !bytes.Contains(y, []byte("sibling: {count: 1}\n")) {
+					t.Errorf("expected unchanged flow-style sibling, got:\n%s", y)
+				}
+				if fixture.name == "scalar sequence" && !bytes.HasPrefix(y, []byte("leaf:\n- ")) {
+					t.Errorf("expected block sequence, got:\n%s", y)
+				}
+				if fixture.name == "quoted map" && tt.name == "flow" && !bytes.HasPrefix(y, []byte("leaf: {")) {
+					t.Errorf("expected quoted multiline value in a flow mapping, got:\n%s", y)
+				}
+				if fixture.name == "auto-quoted flow delimiters" && tt.flow && !bytes.HasPrefix(y, []byte("leaf: {query: \"[1, 2]\"}\n")) {
+					t.Errorf("expected unchanged flow mapping with quoted delimiters, got:\n%s", y)
+				}
+				var back structpb.Struct
+				if err := protoyaml.Unmarshal(y, &back); err != nil {
+					t.Fatalf("Unmarshal: %v\nyaml:\n%s", err, y)
+				}
+				if !proto.Equal(m, &back) {
+					t.Errorf("round-trip mismatch\nyaml:\n%s", y)
+				}
+			})
+		}
+	}
+}
+
 // --- WithProtoJSON variants -----------------------------------------------
 
 // TestWithProtoJSONVariants proves protojson-sanctioned marshal options
